@@ -1,0 +1,38 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "enc debug",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/home/yuanqing/vvcodec/build/debug/vvenc",
+            "args": [
+                "-i", "123",
+                "-w", "416",
+            ],
+            "stopAtEntry": false,
+            "cwd": "/home/yuanqing/vvcodec",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "preLaunchTask": "debug"
+        },
+        {
+            "name": "dec debug",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/home/yuanqing/vvcodec/build/debug/vvdec",
+            "args": [
+            ],
+            "stopAtEntry": false,
+            "cwd": "/home/yuanqing/vvcodec",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "preLaunchTask": "debug"
+        },
+    ]
+}
