@@ -8,46 +8,6 @@
 #include <algorithm>
 #include <regex>
 
-namespace apputils {
-
-namespace program_options {
-
-struct ErrorReporter {
-    ErrorReporter() : is_errored(0) {}
-    virtual ~ErrorReporter() {}
-    virtual std::ostream& error(const std::string& where) {
-        is_errored = 1;
-        outstr << where << " error: ";
-        return outstr;
-    }
-
-    virtual std::ostream& warn(const std::string& where) {
-        is_warning = 1;
-        outstr << where << " warning: ";
-        return outstr;
-    }
-
-    bool is_errored = false;
-    bool is_warning = false;
-    std::stringstream outstr;
-};
-
-struct ParseFailure : public std::exception
-{
-    ParseFailure(std::string arg0, std::string val0) throw()
-        : arg(arg0), val(val0)
-    {}
-
-    ~ParseFailure() throw() {};
-
-    std::string arg;
-    std::string val;
-
-    const char* what() const throw() { return "Option Parse Failure"; }
-};
-
-static ErrorReporter default_error_reporter;
-
 struct OptionBase {
     OptionBase(const std::string& name, const std::string& desc)
     : opt_string(name), opt_desc(desc)
@@ -56,7 +16,7 @@ struct OptionBase {
     virtual ~OptionBase() {}
 
     /* parse argument arg, to obtain a value for the option */
-    virtual void parse(const std::string& arg, ErrorReporter&) = 0;
+    virtual void parse(const std::string& arg) = 0;
     /* set the argument to the default value */
     virtual void setDefault() = 0;
     virtual const std::string getDefault( ) { return std::string(); }
@@ -74,7 +34,7 @@ struct Option : public OptionBase
   : OptionBase(name, desc), opt_storage(storage), opt_default_val(default_val)
   {}
 
-  void parse(const std::string& arg, ErrorReporter&);
+  void parse(const std::string& arg);
 
   void setDefault()
   {
@@ -172,21 +132,15 @@ Option<bool>::parse(const std::string& arg, ErrorReporter&) {
     }
 }
 
-class OptionSpecific;
-
-struct Options
-{
+struct Options {
     ~Options() {
         for(Options::NamesPtrList::iterator it = opt_list.begin(); it != opt_list.end(); it++) {
             delete *it;
         }
     }
-
-    inline OptionSpecific addOptions();
-
     struct Names {
         Names() : opt(0) {};
-            ~Names() {
+        ~Names() {
             if (opt) {
                 delete opt;
             }
@@ -232,17 +186,23 @@ struct Options
     typedef std::map<std::string, NamesPtrList> NamesMap;
     NamesMap opt_long_map;
     NamesMap opt_short_map;
+
+    template<typename T>
+    Options operator()(const std::string& name, T& storage, const std::string& desc = "") {
+        addOption(new Option<T>(name, storage, storage, desc));
+        return Options(*this);
+    }
 };
 
 struct OptionFunc : public OptionBase {
-    typedef void (Func)(Options&, const std::string&, ErrorReporter&);
+    typedef void (Func)(Options&);
 
     OptionFunc(const std::string& name, Options& parent_, Func *func_, const std::string& desc)
     : OptionBase(name, desc), parent(parent_), func(func_)
     {}
 
-    void parse(const std::string& arg, ErrorReporter& error_reporter) {
-        func(parent, arg, error_reporter);
+    void parse(const std::string& arg) {
+        func(parent, arg);
     }
 
     void setDefault() {
@@ -254,68 +214,20 @@ private:
     Func* func;
 };
 
-class OptionSpecific {
-public:
-    OptionSpecific(Options& parent_) : parent(parent_) {}
-
-    /**
-     * Add option described by name to the parent Options list,
-     *   with storage for the option's value
-     *   with default_val as the default value
-     *   with desc as an optional help description
-     */
-    template<typename T>
-    OptionSpecific&
-    operator()(const std::string& name, T& storage, T default_val, const std::string& desc = "") {
-        parent.addOption(new Option<T>(name, storage, default_val, desc));
-        return *this;
-    }
-
-    /**
-     * Add option described by name to the parent Options list,
-     *   without separate default value
-     */
-    template<typename T>
-    OptionSpecific&
-    operator()(const std::string& name, T& storage, const std::string& desc = "") {
-        parent.addOption(new Option<T>(name, storage, storage, desc));
-        return *this;
-    }
-
-    /**
-     * Add option described by name to the parent Options list,
-     *   with desc as an optional help description
-     * instead of storing the value somewhere, a function of type
-     * OptionFunc::Func is called.  It is upto this function to correctly
-     * handle evaluating the option's value.
-     */
-    OptionSpecific&
-    operator()(const std::string& name, OptionFunc::Func *func, const std::string& desc = "") {
-        parent.addOption(new OptionFunc(name, parent, func, desc));
-        return *this;
-    }
-    private:
-    Options& parent;
-};
-
-OptionSpecific Options::addOptions() {
-  return OptionSpecific(*this);
-}
-
-static void setOptions(Options::NamesPtrList& opt_list, const std::string& value, ErrorReporter& error_reporter)
+static void setOptions(Options::NamesPtrList& opt_list, const std::string& value)
 {
   /* multiple options may be registered for the same name:
     *   allow each to parse value */
   for (Options::NamesPtrList::iterator it = opt_list.begin(); it != opt_list.end(); ++it)
   {
-    (*it)->opt->parse(value, error_reporter);
+    (*it)->opt->parse(value);
   }
 }
 
 struct OptionWriter
 {
-  OptionWriter(Options& rOpts, ErrorReporter& err)
-  : opts(rOpts), error_reporter(err)
+  OptionWriter(Options& rOpts)
+  : opts(rOpts)
   {}
   virtual ~OptionWriter() {}
 
@@ -349,12 +261,10 @@ struct OptionWriter
 
     if (!found)
     {
-      error_reporter.error(where())
-        << "Unknown option `" << name << "' (value:`" << value << "')\n";
       return false;
     }
 
-    setOptions((*opt_it).second, value, error_reporter);
+    setOptions((*opt_it).second, value);
     return true;
   }
 
@@ -364,13 +274,12 @@ struct OptionWriter
   }
 
   Options& opts;
-  ErrorReporter& error_reporter;
 };
 
 struct ArgvParser : public OptionWriter
 {
-  ArgvParser(Options& rOpts, ErrorReporter& rError_reporter)
-  : OptionWriter(rOpts, rError_reporter)
+  ArgvParser(Options& rOpts)
+  : OptionWriter(rOpts)
   {}
 
   const std::string where() { return "command line"; }
@@ -479,9 +388,9 @@ struct ArgvParser : public OptionWriter
   }
 };
 
-inline std::list<const char*> scanArgv(Options& opts, unsigned argc, const char* argv[], ErrorReporter& error_reporter = default_error_reporter)
+inline std::list<const char*> scanArgv(Options& opts, unsigned argc, const char* argv[])
 {
-  ArgvParser avp(opts, error_reporter);
+  ArgvParser avp(opts);
 
   /* a list for anything that didn't get handled as an option */
   std::list<const char*> non_option_arguments;
@@ -523,7 +432,4 @@ inline std::list<const char*> scanArgv(Options& opts, unsigned argc, const char*
   }
 
   return non_option_arguments;
-}
-
-}
 }
